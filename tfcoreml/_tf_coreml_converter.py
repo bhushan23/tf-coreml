@@ -476,7 +476,7 @@ def convert(tf_model_path,
             predicted_probabilities_output='',
             add_custom_layers=False,  # type: bool
             custom_conversion_functions={},  # type: Dict[Text, Any]
-            use_coreml_3=False
+            use_coreml_3=True
             ):
 
   """
@@ -502,9 +502,7 @@ def convert(tf_model_path,
       that can be treated as images by Core ML. All other inputs
       are treated as MultiArrays.
 
-  is_bgr: bool | dict()
-      Flag to determine if input images are in pixel order (RGB or BGR).
-      Defaults to False.
+  is_bgr: bool | dict():
       Applicable only if image_input_names is specified.
       To specify different values for each image input provide a dictionary with input names as keys.    
 
@@ -579,19 +577,29 @@ def convert(tf_model_path,
   """
 
   if use_coreml_3:
-    if image_input_names is not None:
-      raise NotImplementedError('Core ML 3 converter does not support image_input_names argument yet.')
-    if not (is_bgr == False and red_bias == 0.0 and green_bias == 0.0 and blue_bias == 0.0 and gray_bias == 0.0 and image_scale == 1.0):
-      raise NotImplementedError('Core ML 3 converter does not support image-related preprocessing arguments yet.')
-    if not (class_labels is None and predicted_feature_name is None and predicted_probabilities_output == ''):
-      raise NotImplementedError('Core ML 3 converter does not support NeuralNetworkClassifier interface yet.')
-    if not (add_custom_layers == False):
-      raise NotImplementedError('Core ML 3 converter does not support Custom layers yet.')
+    # if image_input_names is not None:
+    #   raise NotImplementedError('Core ML 3 converter does not support image_input_names argument yet.')
+    # if not (is_bgr == False and red_bias == 0.0 and green_bias == 0.0 and blue_bias == 0.0 and gray_bias == 0.0 and image_scale == 1.0):
+    #   raise NotImplementedError('Core ML 3 converter does not support image-related preprocessing arguments yet.')
+    # if not (class_labels is None and predicted_feature_name is None and predicted_probabilities_output == ''):
+    #   raise NotImplementedError('Core ML 3 converter does not support NeuralNetworkClassifier interface yet.')
+    # if not (add_custom_layers == False):
+    #   raise NotImplementedError('Core ML 3 converter does not support Custom layers yet.')
 
     mlmodel = coremltools.converters.tensorflow.convert(
-        tf_model_path,
-        inputs=input_name_shape_dict,
-        outputs=output_feature_names)
+                  tf_model_path,
+                  inputs=input_name_shape_dict,
+                  outputs=output_feature_names,
+                  image_input_names=image_input_names,
+                  is_bgr=is_bgr,
+                  red_bias=red_bias,
+                  green_bias=green_bias,
+                  blue_bias=blue_bias,
+                  gray_bias=gray_bias,
+                  image_scale=image_scale,
+                  class_labels=class_labels,
+                  predicted_feature_name=predicted_feature_name,
+                  predicted_probabilities_output=predicted_probabilities_output)
     if mlmodel_path is not None:
       mlmodel.save(mlmodel_path)
     return mlmodel
@@ -602,6 +610,8 @@ def convert(tf_model_path,
   if output_feature_names is None:
     raise ValueError('Output feature names must be provided.')
 
+  if image_input_names is not None:
+    print(input_name_shape_dict, image_input_names)
   return _convert_pb_to_mlmodel(
       tf_model_path,
       mlmodel_path,
