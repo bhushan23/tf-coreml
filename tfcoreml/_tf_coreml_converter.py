@@ -294,6 +294,7 @@ def _convert_pb_to_mlmodel(tf_model_path,
     _check_unsupported_ops(OPS, output_feature_names, effectively_constant_ops + unused_ops)
   print('Now starting translation to CoreML graph.')
 
+
   # Load all the dictionaries in the object of the class "context"
   context = Context(CONSTS, SHAPE_DICT, OPS, BLOB_GRAPH, output_features)
 
@@ -331,10 +332,12 @@ def _convert_pb_to_mlmodel(tf_model_path,
   is_classifier = class_labels is not None
   mode = 'classifier' if is_classifier else None
 
+  print('DDDDD', input_features, output_features)
   # Convert the TF graph with builder
   input_features = list(input_features)
   output_features = list(output_features)
   builder = NeuralNetworkBuilder(input_features, output_features, mode=mode)
+  print('####', builder.spec.description.input, builder.spec.description.output)
   context.builder = builder
   context.session = sess
   context.input_feed_dict = input_feed_dict
@@ -476,7 +479,8 @@ def convert(tf_model_path,
             predicted_probabilities_output='',
             add_custom_layers=False,  # type: bool
             custom_conversion_functions={},  # type: Dict[Text, Any]
-            use_coreml_3=True
+            use_coreml_3=False,
+            custom_shape_functions={} # type: Dict[Text, Any]
             ):
 
   """
@@ -599,7 +603,10 @@ def convert(tf_model_path,
                   image_scale=image_scale,
                   class_labels=class_labels,
                   predicted_feature_name=predicted_feature_name,
-                  predicted_probabilities_output=predicted_probabilities_output)
+                  predicted_probabilities_output=predicted_probabilities_output,
+                  add_custom_layers=add_custom_layers,
+                  custom_conversion_functions=custom_conversion_functions,
+                  custom_shape_functions=custom_shape_functions)
     if mlmodel_path is not None:
       mlmodel.save(mlmodel_path)
     return mlmodel

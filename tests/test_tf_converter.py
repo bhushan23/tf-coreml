@@ -11,6 +11,10 @@ from tensorflow.python.tools.freeze_graph import freeze_graph
 from tensorflow.tools.graph_transforms import TransformGraph
 import tfcoreml as tf_converter
 
+from coremltools.models.utils import macos_version
+
+MIN_MACOS_VERSION_10_15 = (10, 15)
+
 np.random.seed(34)
 
 
@@ -45,15 +49,26 @@ def _tf_transpose(x, is_sequence=False):
     return x
 
 def _convert_to_coreml(tf_model_path, mlmodel_path, input_name_shape_dict,
-    output_names,add_custom_layers=False,custom_conversion_functions={}):
+    output_names, add_custom_layers=False, use_coreml_3=False, custom_conversion_functions={},
+    custom_shape_functions={}):
   """ Convert and return the coreml model from the Tensorflow
   """
+  if use_coreml_3:
+    for key in input_name_shape_dict:
+      if ':' in key:
+        new_key = 'input' #key.replace(':', '_')
+        input_name_shape_dict[new_key] = input_name_shape_dict[key]
+        del input_name_shape_dict[key]
+    
+  print(input_name_shape_dict)
   model = tf_converter.convert(tf_model_path=tf_model_path,
                                 mlmodel_path=mlmodel_path,
                                 output_feature_names=output_names,
                                 input_name_shape_dict=input_name_shape_dict,
+                                use_coreml_3=use_coreml_3,
                                 add_custom_layers=add_custom_layers,
-                                custom_conversion_functions=custom_conversion_functions)
+                                custom_conversion_functions=custom_conversion_functions,
+                                custom_shape_functions=custom_shape_functions)
   return model
 
 def _generate_data(input_shape, mode = 'random'):
@@ -125,7 +140,8 @@ class TFNetworkTest(unittest.TestCase):
   def _test_tf_model(self, graph, input_tensor_shapes, output_node_names,
       data_mode = 'random', delta = 1e-2, is_quantized = False, use_cpu_only = False,
       one_dim_seq_flags = None, check_numerical_accuracy=True,
-      add_custom_layers = False, custom_conversion_functions={}):
+      add_custom_layers = False, custom_conversion_functions={}, 
+      use_coreml_3 = False, custom_shape_functions={}):
     """ Common entry to testing routine.
     graph - defined TensorFlow graph.
     input_tensor_shapes -  dict str:shape for each input (placeholder)
@@ -202,14 +218,16 @@ class TFNetworkTest(unittest.TestCase):
 
 
     # convert the tensorflow model
-    output_tensor_names = [name + ':0' for name in output_node_names]
+    output_tensor_names = output_node_names if use_coreml_3 else [name + ':0' for name in output_node_names]
     coreml_model = _convert_to_coreml(
         tf_model_path=frozen_model_file,
         mlmodel_path=coreml_model_file,
         input_name_shape_dict=input_tensor_shapes,
         output_names=output_tensor_names,
         add_custom_layers=add_custom_layers,
-        custom_conversion_functions=custom_conversion_functions)
+        custom_conversion_functions=custom_conversion_functions,
+        use_coreml_3 = use_coreml_3,
+        custom_shape_functions=custom_shape_functions)
 
     #test numerical accuracy with CoreML
     if check_numerical_accuracy:
@@ -1087,6 +1105,7 @@ class TFCustomLayerTest(TFNetworkTest):
     self.assertIsNotNone(layers[9].custom)
     self.assertEqual('Tile', layers[9].custom.className)
 
+
   def test_custom_topk(self):
 
     def _convert_topk(**kwargs):
@@ -1122,12 +1141,63 @@ class TFCustomLayerTest(TFNetworkTest):
                         custom_conversion_functions = {'TopKV2': _convert_topk})
 
     spec = coreml_model.get_spec()
+    print(spec)
     layers = spec.neuralNetwork.layers
     self.assertIsNotNone(layers[3].custom)
     self.assertEqual('Top_K', layers[3].custom.className)
     self.assertEqual(3, layers[3].custom.parameters['k'].intValue)
     self.assertEqual(False, layers[3].custom.parameters['sorted'].boolValue)
 
+  def test_custom_topk_coreml3(self):
+
+    def _shape_topk(node, input_shapes):
+      k = node.attr.get(node.inputs[1], 3)
+      output_shape = input_shapes[0][:-1] + [k]
+      return [output_shape, output_shape]
+
+    def _convert_topk(ssa_converter, node):
+      tf_op = node.op
+      coreml_nn_builder = ssa_converter._get_builder()
+      constant_inputs = node.attr
+
+      params = NeuralNetwork_pb2.CustomLayerParams()
+      params.className = 'Top_K'
+      params.description = "Custom layer that corresponds to the top_k TF op"
+      params.parameters["sorted"].boolValue = node.attr.get('sorted')
+      # get the value of k
+      k = constant_inputs.get(node.inputs[1], 3)
+      params.parameters["k"].intValue = k
+      coreml_nn_builder.add_custom(name=node.name,
+                                   input_names=[node.inputs[0]],
+                                   output_names=['output'],
+                                   custom_proto_spec=params)
+
+    graph = tf.Graph()
+    with graph.as_default() as g:
+      x = tf.placeholder(tf.float32, shape=[None, 8], name="input")
+      y = tf.layers.dense(inputs=x, units=12, activation=tf.nn.relu)
+      y = tf.nn.softmax(y, axis=1)
+      y = tf.nn.top_k(y, k=3, sorted=False, name='output')
+      print('Y ####:', y)
+
+    output_name = ['output']
+    coreml_model = self._test_tf_model(graph,
+                        {"input:0": [1, 8]},
+                        output_name,
+                        check_numerical_accuracy=False,
+                        add_custom_layers=True,
+                        use_coreml_3=True,
+                        custom_conversion_functions = {'TopKV2': _convert_topk},
+                        custom_shape_functions = {'TopKV2': _shape_topk})
+
+    spec = coreml_model.get_spec()
+    print(spec)
+    layers = spec.neuralNetwork.layers
+    self.assertIsNotNone(layers[3].custom)
+    self.assertEqual('Top_K', layers[3].custom.className)
+    self.assertEqual(3, layers[3].custom.parameters['k'].intValue)
+    self.assertEqual(False, layers[3].custom.parameters['sorted'].boolValue)
+  
   def test_custom_slice(self):
 
     def _convert_slice(**kwargs):

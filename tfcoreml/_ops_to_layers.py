@@ -157,8 +157,8 @@ def stop_translation(context):
 
 def convert_ops_to_layers(context):
   for i, op in enumerate(context.all_ops):
-    print('%d/%d: Analysing op name: %s ( type:  %s )' % (
-      i + 1, len(context.all_ops), op.name, op.type))
+    print('%d/%d: Analysing op name: %s ( type:  %s ) %s' % (
+      i + 1, len(context.all_ops), op.name, op.type, str(context.shape_dict[op.outputs[0].name])))
 
     if stop_translation(context):
       connect_skipped_ops(context)

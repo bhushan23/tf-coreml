@@ -207,9 +207,54 @@ class CorrectnessTest(unittest.TestCase):
       snr, psnr = _compute_SNR(tp, cp)
       self._compare_tf_coreml_outputs(tp, cp)
 
+  def _test_coreml_model(self, tf_model_path, coreml_model, input_name_shape_dict,
+      input_tensor_name, output_tensor_name, img_size, useCPUOnly = False):
+    """Test single image input conversions.
+    tf_model_path - the TF model
+    coreml_model - converted CoreML model
+    input_tensor_name - the input image tensor name
+    output_tensor_name - the output tensor name
+    img_size - size of the image
+    """
+
+    input_dict = {}
+    for key in input_name_shape_dict:
+      input_dict[key] = np.random.rand(*input_name_shape_dict[key])
+    
+    print('INPUT DICT: ', input_dict)
+    #evaluate the TF model
+    tf.reset_default_graph()
+    graph_def = graph_pb2.GraphDef()
+    with open(tf_model_path, "rb") as f:
+        graph_def.ParseFromString(f.read())
+    g = tf.import_graph_def(graph_def)
+    with tf.Session(graph=g) as sess:  
+      image_input_tensor = sess.graph.get_tensor_by_name('import/' + input_tensor_name)
+      output = sess.graph.get_tensor_by_name('import/' + output_tensor_name)
+      tf_out = sess.run(output,feed_dict={image_input_tensor: input_dict[input_tensor_name]})
+    if len(tf_out.shape) == 4:
+      tf_out = np.transpose(tf_out, (0,3,1,2))
+    tf_out_flatten = tf_out.flatten()
+    
+    #evaluate CoreML
+    if not use_coreml_3:
+      coreml_input_name = input_tensor_name.replace(':', '__').replace('/', '__')
+      coreml_output_name = output_tensor_name.replace(':', '__').replace('/', '__')
+    else:
+      coreml_input_name = input_tensor_name.split(':')[0]
+      coreml_output_name = output_tensor_name.split(':')[0]
+    coreml_input = {coreml_input_name: input_dict[input_tensor_name]}
+    
+    #Test the default CoreML evaluation
+    print(coreml_input)
+    coreml_out = coreml_model.predict(coreml_input, useCPUOnly = useCPUOnly)[coreml_output_name]
+    coreml_out_flatten = coreml_out.flatten()
+    self._compare_tf_coreml_outputs(tf_out_flatten, coreml_out_flatten)
+
+
 
   def _test_coreml_model_image_input(self, tf_model_path, coreml_model, 
-      input_tensor_name, output_tensor_name, img_size, useCPUOnly = False):
+                                    input_tensor_name, output_tensor_name, img_size, useCPUOnly = False):
     """Test single image input conversions.
     tf_model_path - the TF model
     coreml_model - converted CoreML model
@@ -239,11 +284,16 @@ class CorrectnessTest(unittest.TestCase):
     tf_out_flatten = tf_out.flatten()
     
     #evaluate CoreML
-    coreml_input_name = input_tensor_name.replace(':', '__').replace('/', '__')
-    coreml_output_name = output_tensor_name.replace(':', '__').replace('/', '__')
+    if not use_coreml_3:
+      coreml_input_name = input_tensor_name.replace(':', '__').replace('/', '__')
+      coreml_output_name = output_tensor_name.replace(':', '__').replace('/', '__')
+    else:
+      coreml_input_name = input_tensor_name.split(':')[0]
+      coreml_output_name = output_tensor_name.split(':')[0]
     coreml_input = {coreml_input_name: img}
     
     #Test the default CoreML evaluation
+    print(coreml_input)
     coreml_out = coreml_model.predict(coreml_input, useCPUOnly = useCPUOnly)[coreml_output_name]
     coreml_out_flatten = coreml_out.flatten()
     self._compare_tf_coreml_outputs(tf_out_flatten, coreml_out_flatten)
@@ -261,13 +311,14 @@ class TestModels(CorrectnessTest):
     mlmodel = tf_converter.convert(
         tf_model_path = tf_model_path,
         mlmodel_path = mlmodel_path,
-        output_feature_names = ['InceptionV3/Predictions/Softmax:0'],
-        input_name_shape_dict = {'input:0':[1,299,299,3]},
-        image_input_names = ['input:0'],
+        output_feature_names = ['InceptionV3/Predictions/Softmax__0'],
+        input_name_shape_dict = {'input__0':[1,299,299,3]},
+        # image_input_names = ['input'],
         red_bias = -1, 
         green_bias = -1, 
         blue_bias = -1, 
-        image_scale = 2.0/255.0)
+        image_scale = 2.0/255
+        ,use_coreml_3=True)
 
     #Test predictions on an image
     self._test_coreml_model_image_input(
@@ -288,13 +339,14 @@ class TestModels(CorrectnessTest):
     mlmodel = tf_converter.convert(
         tf_model_path = tf_model_path,
         mlmodel_path = mlmodel_path,
-        output_feature_names = ['softmax2:0'],
-        input_name_shape_dict = {'input:0':[1,224,224,3]},
-        image_input_names = ['input:0'],
+        output_feature_names = ['softmax2'],
+        input_name_shape_dict = {'input':[1,224,224,3]},
+        image_input_names = ['input'],
         red_bias = -1, 
         green_bias = -1, 
         blue_bias = -1, 
-        image_scale = 2.0/255.0)
+        image_scale = 2.0/255.0,
+        use_coreml_3=True)
 
     #Test predictions on an image
     self._test_coreml_model_image_input(
@@ -329,30 +381,51 @@ class TestModels(CorrectnessTest):
         output_tensor_name = 'InceptionResnetV2/Logits/Predictions:0',
         img_size = 299)
 
-  def test_googlenet_v1_slim(self):
+  def test_googlenet_v1_slim(self, use_coreml_3=False):
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception_v1_2016_08_28_frozen.pb.tar.gz'
     tf_model_dir = _download_file(url = url)
     tf_model_path = os.path.join(TMP_MODEL_DIR, 'inception_v1_2016_08_28_frozen.pb')
 
     mlmodel_path = os.path.join(TMP_MODEL_DIR, 'inception_v1_2016_08_28_frozen.mlmodel')
+    input_name = 'input' + (':0' if not use_coreml_3 else '')
+    output_name = 'InceptionV1/Logits/Predictions/Softmax' + (':0' if not use_coreml_3 else '')
     mlmodel = tf_converter.convert(
         tf_model_path = tf_model_path,
         mlmodel_path = mlmodel_path,
-        output_feature_names = ['InceptionV1/Logits/Predictions/Softmax:0'],
-        input_name_shape_dict = {'input:0':[1,224,224,3]},
-        image_input_names = ['input:0'],
+        output_feature_names = [output_name],
+        input_name_shape_dict = {input:[1,224,224,3]},
+        image_input_names = [input],
         red_bias = -1, 
         green_bias = -1, 
         blue_bias = -1, 
-        image_scale = 2.0/255.0)
+        image_scale = 2.0 / 255.0,
+        use_coreml_3=use_coreml_3)
 
-    #Test predictions on an image
+    # Test predictions on an image
     self._test_coreml_model_image_input(
         tf_model_path = tf_model_path, 
         coreml_model = mlmodel,
         input_tensor_name = 'input:0',
         output_tensor_name = 'InceptionV1/Logits/Predictions/Softmax:0',
-        img_size = 224)
+        img_size = 224,
+        use_coreml_3=use_coreml_3)
+
+    mlmodel = tf_converter.convert(
+        tf_model_path = tf_model_path,
+        mlmodel_path = mlmodel_path,
+        output_feature_names = [output_name],
+        input_name_shape_dict = {input_name:[1,224,224,3]},
+        use_coreml_3=use_coreml_3)
+    
+    # Test Input as Multi-Array
+    self._test_coreml_model(
+        tf_model_path = tf_model_path, 
+        coreml_model = mlmodel,
+        input_name_shape_dict = {'input:0':[1,224,224,3]},
+        input_tensor_name = 'input:0',
+        output_tensor_name = 'InceptionV1/Logits/Predictions/Softmax:0',
+        img_size = 224,
+        use_coreml_3=use_coreml_3)
 
   def test_googlenet_v2_slim(self):
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception_v2_2016_08_28_frozen.pb.tar.gz'
