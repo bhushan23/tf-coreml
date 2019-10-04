@@ -208,7 +208,7 @@ class CorrectnessTest(unittest.TestCase):
       self._compare_tf_coreml_outputs(tp, cp)
 
   def _test_coreml_model(self, tf_model_path, coreml_model, input_name_shape_dict,
-      input_tensor_name, output_tensor_name, img_size, useCPUOnly = False):
+      input_tensor_name, output_tensor_name, img_size, useCPUOnly=False, use_coreml_3=False):
     """Test single image input conversions.
     tf_model_path - the TF model
     coreml_model - converted CoreML model
@@ -221,7 +221,6 @@ class CorrectnessTest(unittest.TestCase):
     for key in input_name_shape_dict:
       input_dict[key] = np.random.rand(*input_name_shape_dict[key])
     
-    print('INPUT DICT: ', input_dict)
     #evaluate the TF model
     tf.reset_default_graph()
     graph_def = graph_pb2.GraphDef()
@@ -246,15 +245,14 @@ class CorrectnessTest(unittest.TestCase):
     coreml_input = {coreml_input_name: input_dict[input_tensor_name]}
     
     #Test the default CoreML evaluation
-    print(coreml_input)
     coreml_out = coreml_model.predict(coreml_input, useCPUOnly = useCPUOnly)[coreml_output_name]
     coreml_out_flatten = coreml_out.flatten()
     self._compare_tf_coreml_outputs(tf_out_flatten, coreml_out_flatten)
 
 
 
-  def _test_coreml_model_image_input(self, tf_model_path, coreml_model, 
-                                    input_tensor_name, output_tensor_name, img_size, useCPUOnly = False):
+  def _test_coreml_model_image_input(self, tf_model_path, coreml_model, input_tensor_name,
+                                     output_tensor_name, img_size, useCPUOnly = False, use_coreml_3=False):
     """Test single image input conversions.
     tf_model_path - the TF model
     coreml_model - converted CoreML model
@@ -293,14 +291,13 @@ class CorrectnessTest(unittest.TestCase):
     coreml_input = {coreml_input_name: img}
     
     #Test the default CoreML evaluation
-    print(coreml_input)
     coreml_out = coreml_model.predict(coreml_input, useCPUOnly = useCPUOnly)[coreml_output_name]
     coreml_out_flatten = coreml_out.flatten()
     self._compare_tf_coreml_outputs(tf_out_flatten, coreml_out_flatten)
 
 class TestModels(CorrectnessTest):         
   
-  def test_inception_v3_slim(self):
+  def test_inception_v3_slim(self, use_coreml_3=False):
     #Download model
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception_v3_2016_08_28_frozen.pb.tar.gz'
     tf_model_dir = _download_file(url = url)
@@ -312,13 +309,13 @@ class TestModels(CorrectnessTest):
         tf_model_path = tf_model_path,
         mlmodel_path = mlmodel_path,
         output_feature_names = ['InceptionV3/Predictions/Softmax__0'],
-        input_name_shape_dict = {'input__0':[1,299,299,3]},
-        # image_input_names = ['input'],
+        input_name_shape_dict = {'input:0':[1,299,299,3]},
+        image_input_names = ['input'],
         red_bias = -1, 
         green_bias = -1, 
         blue_bias = -1, 
-        image_scale = 2.0/255
-        ,use_coreml_3=True)
+        image_scale = 2.0/255,
+        use_coreml_3=use_coreml_3)
 
     #Test predictions on an image
     self._test_coreml_model_image_input(
@@ -328,7 +325,10 @@ class TestModels(CorrectnessTest):
         output_tensor_name = 'InceptionV3/Predictions/Softmax:0',
         img_size = 299)
 
-  def test_googlenet_v1_nonslim(self):
+  def test_inception_v3_slim_use_coreml_3(self):
+    self.test_inception_v3_slim(use_coreml_3=True)
+
+  def test_googlenet_v1_nonslim(self, use_coreml_3=False):
     #Download model
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception5h.zip'
     tf_model_dir = _download_file(url = url)
@@ -346,7 +346,7 @@ class TestModels(CorrectnessTest):
         green_bias = -1, 
         blue_bias = -1, 
         image_scale = 2.0/255.0,
-        use_coreml_3=True)
+        use_coreml_3=use_coreml_3)
 
     #Test predictions on an image
     self._test_coreml_model_image_input(
@@ -356,7 +356,10 @@ class TestModels(CorrectnessTest):
         output_tensor_name = 'softmax2:0',
         img_size = 224)
 
-  def test_googlenet_resnet_v2(self):
+  def test_googlenet_v1_nonslim_use_coreml_3(self):
+    self.test_googlenet_v1_nonslim(use_coreml_3=True)
+
+  def test_googlenet_resnet_v2(self, use_coreml_3=False):
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception_resnet_v2_2016_08_30_frozen.pb.tar.gz'
     tf_model_dir = _download_file(url = url)
     tf_model_path = os.path.join(TMP_MODEL_DIR, 'inception_resnet_v2_2016_08_30_frozen.pb')
@@ -381,20 +384,23 @@ class TestModels(CorrectnessTest):
         output_tensor_name = 'InceptionResnetV2/Logits/Predictions:0',
         img_size = 299)
 
+  def test_googlenet_resnet_v2_use_coreml_3(self):
+    self.test_googlenet_resnet_v2(use_coreml_3=True)
+
   def test_googlenet_v1_slim(self, use_coreml_3=False):
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception_v1_2016_08_28_frozen.pb.tar.gz'
     tf_model_dir = _download_file(url = url)
     tf_model_path = os.path.join(TMP_MODEL_DIR, 'inception_v1_2016_08_28_frozen.pb')
 
     mlmodel_path = os.path.join(TMP_MODEL_DIR, 'inception_v1_2016_08_28_frozen.mlmodel')
-    input_name = 'input' + (':0' if not use_coreml_3 else '')
-    output_name = 'InceptionV1/Logits/Predictions/Softmax' + (':0' if not use_coreml_3 else '')
+    input_name = 'input'  #+ (':0' if not use_coreml_3 else '')
+    output_name = 'InceptionV1/Logits/Predictions/Softmax' # + (':0' if not use_coreml_3 else '')
     mlmodel = tf_converter.convert(
         tf_model_path = tf_model_path,
         mlmodel_path = mlmodel_path,
         output_feature_names = [output_name],
-        input_name_shape_dict = {input:[1,224,224,3]},
-        image_input_names = [input],
+        input_name_shape_dict = {input_name:[1,224,224,3]},
+        image_input_names = [input_name],
         red_bias = -1, 
         green_bias = -1, 
         blue_bias = -1, 
@@ -426,6 +432,9 @@ class TestModels(CorrectnessTest):
         output_tensor_name = 'InceptionV1/Logits/Predictions/Softmax:0',
         img_size = 224,
         use_coreml_3=use_coreml_3)
+
+  def test_googlenet_v1_slim_use_coreml_3(self):
+    self.test_googlenet_v1_slim(use_coreml_3=True)
 
   def test_googlenet_v2_slim(self):
     url = 'https://storage.googleapis.com/download.tensorflow.org/models/inception_v2_2016_08_28_frozen.pb.tar.gz'
